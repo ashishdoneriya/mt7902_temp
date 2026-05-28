@@ -8,11 +8,11 @@ Mediatek mt7902 wifi 6E chip Bluetooth and WiFi Support
 ## 📁 Cloning the repository
 Clone the repository to your local pc
   ```
-  git clone https://github.com/OnlineLearningTutorials/mt7902_temp
+  git clone https://github.com/ashishdoneriya/mt7902_temp
   ```
 If you don't want to clone past history than 
   ```
-  git clone --depth 1 https://github.com/OnlineLearningTutorials/mt7902_temp
+  git clone --depth 1 https://github.com/ashishdoneriya/mt7902_temp
   ```
 
 ## Installation
@@ -25,7 +25,7 @@ chmod +x ./install_guide.sh
 ```
 Now run this script
 ```
-./install_guide.sh
+sudo ./install_guide.sh
 ```
 It will automatically prompt for password when necessary
 * This script will ask you to install firmware, bluetooth and wifi driver one by one
