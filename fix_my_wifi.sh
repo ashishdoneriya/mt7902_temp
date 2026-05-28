@@ -25,10 +25,12 @@
 set -e
 
 # Variables declaration
-SCRIPT_DIR=$(pwd)
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 LINUX_DIR="$SCRIPT_DIR/linux-$(uname -r | cut -d'.' -f1,2)"
 BT_DIR="$LINUX_DIR/drivers/bluetooth"
 WIFI_DIR="$LINUX_DIR/drivers/net/wireless/mediatek/mt76" # SIXSEVENNN (cringe)
+CUSTOM_MODULE_DIR="/lib/modules/mt7902_custom"
+FIRMWARE_DIR="/lib/firmware/mediatek"
 
 # Usage Check: Ensure script is run with sudo
 if [[ $EUID -ne 0 ]]; then
@@ -39,6 +41,10 @@ fi
 
 echo "🚀 Starting MT7902 Fix..."
 
+if [ ! -d "$LINUX_DIR" ]; then
+    echo "❌ Driver source not found for kernel $(uname -r): $LINUX_DIR"
+    exit 1
+fi
 
 if command -v apt &> /dev/null; then
     apt-get update
@@ -61,21 +67,28 @@ fi
 # Detect kernel compiler
 if grep -qi "clang" /proc/version; then
     echo "🔍 Clang compiled kernel detected. Using Clang for module."
-    COMPILER_ARGS="CC=clang LD=ld.lld"
+    COMPILER_ARGS=(CC=clang LD=ld.lld)
 elif grep -qi "gcc" /proc/version; then
     echo "🔍 GCC compiled kernel detected. Using GCC for module."
-    COMPILER_ARGS="CC=gcc "
+    COMPILER_ARGS=(CC=gcc)
+else
+    COMPILER_ARGS=()
 fi
+
+# 1. Install Firmware
+echo "📦 Installing MT7902 firmware..."
+install -d "$FIRMWARE_DIR"
+install -m 644 "$SCRIPT_DIR"/firmware/*.zst "$FIRMWARE_DIR"/
 
 # 2. Compile WiFi Modules
 echo "🛠️ Compiling WiFi modules..."
 if [ -d "$WIFI_DIR" ]; then
-	cd $WIFI_DIR
+	cd "$WIFI_DIR"
 	make clean
-	make $COMPILER_ARGS module_compile
+	make "${COMPILER_ARGS[@]}" module_compile
 else 
-	echo "WIFI driver source not found for this kernel version, stopping..."
-	exit 0
+	echo "❌ WiFi driver source not found for this kernel version, stopping..."
+	exit 1
 fi
 
 # 3. Compile Bluetooth Modules
@@ -83,21 +96,21 @@ echo "🛠️ Compiling Bluetooth modules..."
 if [ -d "$BT_DIR" ]; then
     cd "$BT_DIR"
     make clean
-    make $COMPILER_ARGS
+    make "${COMPILER_ARGS[@]}" module_compile
 else
-    echo "⚠️ Bluetooth source not found for this kernel version, stopping..."
-    exit 0
+    echo "❌ Bluetooth source not found for this kernel version, stopping..."
+    exit 1
 fi
 
 # 4. Prepare and Copy Modules
 echo "📂 Installing modules..."
 
-cd $WIFI_DIR
-mkdir -p /lib/modules/mt7902_custom/
-cp *.ko /lib/modules/mt7902_custom/
-cp mt7921/*.ko /lib/modules/mt7902_custom/
+install -d "$CUSTOM_MODULE_DIR"
+cd "$WIFI_DIR"
+install -m 644 mt76.ko mt76-connac-lib.ko mt792x-lib.ko "$CUSTOM_MODULE_DIR"/
+install -m 644 mt7921/mt7921-common.ko mt7921/mt7921e.ko "$CUSTOM_MODULE_DIR"/
 cd "$BT_DIR"
-cp btmtk.ko btusb.ko /lib/modules/mt7902_custom/
+install -m 644 btmtk.ko btusb.ko "$CUSTOM_MODULE_DIR"/
 
 
 
@@ -105,8 +118,10 @@ cp btmtk.ko btusb.ko /lib/modules/mt7902_custom/
 echo "📝 Configuring startup service..."
 cat <<EOF | tee /usr/local/bin/mt7902-setup.sh
 #!/bin/bash
+set -e
+
 # Unload conflicting modules
-rmmod btusb btmtk mt7921e mt7921_common mt792x_lib mt76_connac_lib mt76 2>/dev/null
+rmmod btusb btmtk mt7921e mt7921_common mt792x_lib mt76_connac_lib mt76 2>/dev/null || true
 
 # Load WiFi stack
 modprobe cfg80211
@@ -131,7 +146,7 @@ if [ -f /lib/modules/mt7902_custom/btmtk.ko ]; then
     insmod /lib/modules/mt7902_custom/btmtk.ko
     insmod /lib/modules/mt7902_custom/btusb.ko
 
-    systemctl restart bluetooth
+    systemctl restart bluetooth || true
 fi
 EOF
 
@@ -141,7 +156,9 @@ chmod +x /usr/local/bin/mt7902-setup.sh
 cat <<EOF | tee /etc/systemd/system/mt7902.service
 [Unit]
 Description=Load custom MT7902 Bluetooth and Wi-Fi drivers
-After=network.target
+After=network-pre.target
+Before=network.target
+Wants=network-pre.target
 
 [Service]
 Type=oneshot

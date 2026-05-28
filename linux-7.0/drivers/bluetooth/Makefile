@@ -14,12 +14,12 @@ module_compile:
 	$(MAKE) -C /lib/modules/`uname -r`/build/ M=`pwd` modules
 	
 	
-module_compress: $(ZSTD_BINS)
+module_compress:
 	@echo "-- Module Compression"
-	
+	@find . -maxdepth 1 -name "*.ko" -exec zstd -f {} \;
 
 %.ko.zst: %.ko
-	zstd $<
+	zstd -f $<
 
 
 module_install: $(MOD_DIR)
