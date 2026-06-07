@@ -26,7 +26,44 @@ set -e
 
 # Variables declaration
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-LINUX_DIR="$SCRIPT_DIR/linux-$(uname -r | cut -d'.' -f1,2)"
+KERNEL_MM=$(uname -r | cut -d'.' -f1,2)
+REQUESTED_LINUX_DIR="$SCRIPT_DIR/linux-$KERNEL_MM"
+
+select_linux_dir() {
+    local requested_dir=$1
+    local candidate candidate_version selected_dir
+
+    if [ -n "${MT7902_LINUX_DIR:-}" ]; then
+        if [[ "$MT7902_LINUX_DIR" = /* ]]; then
+            echo "$MT7902_LINUX_DIR"
+        else
+            echo "$SCRIPT_DIR/$MT7902_LINUX_DIR"
+        fi
+        return 0
+    fi
+
+    if [ -d "$requested_dir" ]; then
+        echo "$requested_dir"
+        return 0
+    fi
+
+    while IFS= read -r candidate; do
+        [ -d "$candidate/drivers/bluetooth" ] || continue
+        [ -d "$candidate/drivers/net/wireless/mediatek/mt76" ] || continue
+
+        selected_dir="$candidate"
+        candidate_version=${candidate##*/linux-}
+        if [ "$(printf '%s\n%s\n' "$KERNEL_MM" "$candidate_version" | sort -V | head -n1)" = "$KERNEL_MM" ]; then
+            echo "$candidate"
+            return 0
+        fi
+    done < <(find "$SCRIPT_DIR" -maxdepth 1 -type d -name 'linux-[0-9]*' | sort -V)
+
+    [ -n "$selected_dir" ] && echo "$selected_dir"
+    return 0
+}
+
+LINUX_DIR=$(select_linux_dir "$REQUESTED_LINUX_DIR")
 BT_DIR="$LINUX_DIR/drivers/bluetooth"
 WIFI_DIR="$LINUX_DIR/drivers/net/wireless/mediatek/mt76" # SIXSEVENNN (cringe)
 CUSTOM_MODULE_DIR="/lib/modules/mt7902_custom"
@@ -41,9 +78,16 @@ fi
 
 echo "🚀 Starting MT7902 Fix..."
 
-if [ ! -d "$LINUX_DIR" ]; then
-    echo "❌ Driver source not found for kernel $(uname -r): $LINUX_DIR"
+if [ -z "$LINUX_DIR" ] || [ ! -d "$LINUX_DIR" ]; then
+    echo "❌ No usable bundled driver source found under $SCRIPT_DIR"
     exit 1
+fi
+
+if [ "$LINUX_DIR" != "$REQUESTED_LINUX_DIR" ]; then
+    echo "⚠️ Exact driver source not found for kernel $(uname -r): $REQUESTED_LINUX_DIR"
+    echo "➡️ Using bundled source instead: $LINUX_DIR"
+else
+    echo "📁 Using driver source: $LINUX_DIR"
 fi
 
 if command -v apt &> /dev/null; then
@@ -78,7 +122,7 @@ fi
 # 1. Install Firmware
 echo "📦 Installing MT7902 firmware..."
 install -d "$FIRMWARE_DIR"
-install -m 644 "$SCRIPT_DIR"/firmware/*.zst "$FIRMWARE_DIR"/
+install -m 644 "$SCRIPT_DIR"/firmware/*.bin "$SCRIPT_DIR"/firmware/*.zst "$FIRMWARE_DIR"/
 
 # 2. Compile WiFi Modules
 echo "🛠️ Compiling WiFi modules..."

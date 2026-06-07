@@ -1697,8 +1697,13 @@ void mt76_wcid_add_poll(struct mt76_dev *dev, struct mt76_wcid *wcid)
 }
 EXPORT_SYMBOL_GPL(mt76_wcid_add_poll);
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 13, 0)
+int mt76_get_txpower(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
+		     int *dbm)
+#else
 int mt76_get_txpower(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 		     unsigned int link_id, int *dbm)
+#endif
 {
 	struct mt76_phy *phy = mt76_vif_phy(hw, vif);
 	int n_chains, delta;
